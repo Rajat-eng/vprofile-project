@@ -2,22 +2,15 @@
 set -e
 
 # -------------------------------
-# System tuning (REQUIRED for ES)
+# System tuning (Elasticsearch)
 # -------------------------------
-sudo cp /etc/sysctl.conf /root/sysctl.conf_backup || true
-
-echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -w vm.max_map_count=524288
+echo "vm.max_map_count=524288" | sudo tee -a /etc/sysctl.conf
 echo "fs.file-max=65536" | sudo tee -a /etc/sysctl.conf
 
-# Apply immediately
-sudo sysctl -w vm.max_map_count=262144
-sudo sysctl -p
-
 # -------------------------------
-# Limits (for sonar user)
+# Limits
 # -------------------------------
-sudo cp /etc/security/limits.conf /root/sec_limit.conf_backup || true
-
 cat <<EOT | sudo tee -a /etc/security/limits.conf
 sonar soft nofile 65536
 sonar hard nofile 65536
@@ -29,47 +22,47 @@ EOT
 # Install dependencies
 # -------------------------------
 sudo apt update -y
-sudo apt install -y openjdk-17-jdk wget curl unzip gnupg
+sudo apt install -y openjdk-21-jdk wget curl unzip gnupg nginx
 
 java -version
 
 # -------------------------------
 # Install PostgreSQL
 # -------------------------------
-sudo install -d /usr/share/postgresql-common/pgdg
-
-wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | \
-  gpg --dearmor | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg > /dev/null
-
-echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | \
-  sudo tee /etc/apt/sources.list.d/pgdg.list
-
-sudo apt update
 sudo apt install -y postgresql postgresql-contrib
-
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
 
 # -------------------------------
-# Setup database
+# Setup DB
 # -------------------------------
 sudo -u postgres psql <<EOF
+DROP DATABASE IF EXISTS sonarqube;
+DROP USER IF EXISTS sonar;
 CREATE USER sonar WITH ENCRYPTED PASSWORD 'admin123';
 CREATE DATABASE sonarqube OWNER sonar;
 GRANT ALL PRIVILEGES ON DATABASE sonarqube TO sonar;
 EOF
 
 # -------------------------------
-# Install SonarQube
+# Download SonarQube (FIXED URL)
 # -------------------------------
 cd /tmp
-wget https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-9.9.8.100196.zip
 
-sudo unzip -o sonarqube-9.9.8.100196.zip -d /opt/
-sudo mv /opt/sonarqube-9.9.8.100196 /opt/sonarqube
+wget --header="User-Agent: Mozilla/5.0" \
+https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-26.3.0.120487.zip \
+-O sonarqube.zip
 
 # -------------------------------
-# Create sonar user
+# Extract properly
+# -------------------------------
+sudo unzip -o sonarqube.zip -d /opt/
+SONAR_DIR=$(ls /opt | grep sonarqube-26 | head -n 1)
+
+sudo mv /opt/$SONAR_DIR /opt/sonarqube
+
+# -------------------------------
+# Create user
 # -------------------------------
 if ! id "sonar" &>/dev/null; then
   sudo groupadd sonar
@@ -79,7 +72,7 @@ fi
 sudo chown -R sonar:sonar /opt/sonarqube
 
 # -------------------------------
-# Configure SonarQube (LOW RAM SAFE)
+# Configure SonarQube
 # -------------------------------
 cat <<EOT | sudo tee /opt/sonarqube/conf/sonar.properties
 sonar.jdbc.username=sonar
@@ -89,20 +82,20 @@ sonar.jdbc.url=jdbc:postgresql://localhost:5432/sonarqube
 sonar.web.host=0.0.0.0
 sonar.web.port=9000
 
-# 🔥 VERY LOW MEMORY (ES SAFE)
-sonar.search.javaOpts=-Xms128m -Xmx128m -XX:+HeapDumpOnOutOfMemoryError
-sonar.web.javaOpts=-Xms128m -Xmx128m
+# Balanced memory for 4GB EC2
+sonar.search.javaOpts=-Xms512m -Xmx512m
+sonar.web.javaOpts=-Xms512m -Xmx512m
 
 sonar.log.level=INFO
 EOT
 
 # -------------------------------
-# Systemd service (ES optimized)
+# Systemd service
 # -------------------------------
 cat <<EOT | sudo tee /etc/systemd/system/sonarqube.service
 [Unit]
 Description=SonarQube service
-After=network.target
+After=network.target postgresql.service
 
 [Service]
 Type=forking
@@ -111,6 +104,7 @@ ExecStop=/opt/sonarqube/bin/linux-x86-64/sonar.sh stop
 User=sonar
 Group=sonar
 Restart=always
+RestartSec=10
 
 LimitNOFILE=65536
 LimitNPROC=4096
@@ -121,23 +115,24 @@ WantedBy=multi-user.target
 EOT
 
 # -------------------------------
-# Clean old Elasticsearch data
+# Clean ES old state
 # -------------------------------
-sudo rm -rf /opt/sonarqube/data/es7
+sudo rm -rf /opt/sonarqube/data
+sudo mkdir -p /opt/sonarqube/data
+sudo chown -R sonar:sonar /opt/sonarqube
 
 # -------------------------------
-# Reload + start
+# Enable & start services
 # -------------------------------
-sudo systemctl daemon-reexec
 sudo systemctl daemon-reload
-sudo systemctl enable sonarqube
+sudo systemctl enable sonarqube postgresql nginx
+
 sudo systemctl start sonarqube
+sudo systemctl start nginx
 
 # -------------------------------
-# Install Nginx
+# Configure Nginx
 # -------------------------------
-sudo apt install -y nginx
-
 sudo rm -f /etc/nginx/sites-enabled/default
 
 cat <<EOT | sudo tee /etc/nginx/sites-available/sonarqube
@@ -155,13 +150,15 @@ server {
 EOT
 
 sudo ln -sf /etc/nginx/sites-available/sonarqube /etc/nginx/sites-enabled/
-sudo systemctl enable nginx
+sudo nginx -t
 sudo systemctl restart nginx
 
 # -------------------------------
 # Final output
 # -------------------------------
-echo "✅ SonarQube setup complete"
-echo "Wait ~1–2 minutes before opening UI"
+echo "==================================="
+echo "✅ SonarQube Setup Complete"
+echo "Wait ~2 minutes for startup"
 echo "URL: http://<your-ec2-ip>"
 echo "Login: admin / admin"
+echo "==================================="
