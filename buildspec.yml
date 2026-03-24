@@ -1,0 +1,79 @@
+version: 0.2
+
+env:
+  parameter-store:
+    LOGIN: LOGIN
+    HOST: HOST
+    Organization: Organization
+    Project: Project
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto17
+    commands:
+      - echo "Setting up Maven settings"
+      - mkdir -p /root/.m2
+      - cp ./settings.xml /root/.m2/settings.xml
+
+      - echo "Getting CodeArtifact token"
+      - export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+        --domain rexy \
+        --domain-owner 326306381458 \
+        --region ap-south-1 \
+        --query authorizationToken \
+        --output text)
+
+  pre_build:
+    commands:
+      - echo "Installing dependencies"
+      - apt-get update
+      - apt-get install -y jq checkstyle
+
+      - echo "Installing Maven"
+      - wget https://dlcdn.apache.org/maven/maven-3/3.9.4/binaries/apache-maven-3.9.4-bin.tar.gz
+      - tar xzvf apache-maven-3.9.4-bin.tar.gz
+      - mv apache-maven-3.9.4 /opt/maven
+      - export PATH=$PATH:/opt/maven/bin
+
+      - echo "Extracting branch name"
+      - echo "Raw source version: $CODEBUILD_SOURCE_VERSION"
+      - BRANCH_NAME=$(echo $CODEBUILD_SOURCE_VERSION | sed 's|refs/heads/||')
+      - echo "Branch name: $BRANCH_NAME"
+
+  build:
+    commands:
+      - echo "Running tests"
+      - mvn clean test
+
+      - echo "Running checkstyle"
+      - mvn checkstyle:checkstyle
+
+      - echo "Running SonarCloud analysis"
+      - mvn sonar:sonar \
+        -Dsonar.login=$LOGIN \
+        -Dsonar.host.url=$HOST \
+        -Dsonar.projectKey=$Project \
+        -Dsonar.organization=$Organization \
+        -Dsonar.branch.name=$BRANCH_NAME \
+        -Dsonar.java.binaries=target/classes \
+        -Dsonar.junit.reportsPath=target/surefire-reports \
+        -Dsonar.jacoco.reportsPath=target/jacoco.exec \
+        -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml
+
+      - echo "Waiting for SonarCloud Quality Gate"
+      - sleep 10
+
+      - echo "Checking Quality Gate status"
+      - curl -s "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$Project" > result.json
+      - cat result.json
+
+      - STATUS=$(jq -r '.projectStatus.status' result.json)
+
+      - |
+        if [ "$STATUS" = "ERROR" ]; then
+          echo "❌ Quality Gate Failed"
+          exit 1
+        else
+          echo "✅ Quality Gate Passed"
+        fi
