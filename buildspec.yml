@@ -24,17 +24,18 @@ phases:
         --query authorizationToken \
         --output text)
 
+      - echo "Installing Maven"
+      - wget https://repo1.maven.org/maven2/org/apache/maven/apache-maven/3.9.4/apache-maven-3.9.4-bin.tar.gz
+      - tar xzvf apache-maven-3.9.4-bin.tar.gz
+      - mv apache-maven-3.9.4 /opt/maven
+      - ln -sf /opt/maven/bin/mvn /usr/local/bin/mvn
+      - mvn -v
+
   pre_build:
     commands:
       - echo "Installing dependencies"
       - apt-get update
       - apt-get install -y jq checkstyle
-
-      - echo "Installing Maven"
-      - wget https://repo1.maven.org/maven2/org/apache/maven/apache-maven/3.9.4/apache-maven-3.9.4-bin.tar.gz
-      - tar xzvf apache-maven-3.9.4-bin.tar.gz
-      - mv apache-maven-3.9.4 /opt/maven
-      - export PATH=$PATH:/opt/maven/bin
 
       - echo "Extracting branch name"
       - 'echo "Raw source version: $CODEBUILD_SOURCE_VERSION"'
