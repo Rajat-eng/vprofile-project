@@ -1,4 +1,3 @@
-
 version: 0.2
 
 env:
@@ -34,14 +33,18 @@ phases:
       - apt-get install -y jq checkstyle curl
 
       - echo "Extracting branch name"
-      - 'echo "CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION"'
-      - 'echo "CODEBUILD_WEBHOOK_HEAD_REF=$CODEBUILD_WEBHOOK_HEAD_REF"'
-      - export BRANCH_NAME=$(echo "$CODEBUILD_WEBHOOK_HEAD_REF" | sed 's|refs/heads/||')
       - |
+        echo "CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION"
+        echo "CODEBUILD_WEBHOOK_HEAD_REF=$CODEBUILD_WEBHOOK_HEAD_REF"
+
+        BRANCH_NAME=$(echo "$CODEBUILD_WEBHOOK_HEAD_REF" | sed 's|refs/heads/||')
+
         if [ -z "$BRANCH_NAME" ]; then
           BRANCH_NAME=$(echo "$CODEBUILD_SOURCE_VERSION" | sed 's|refs/heads/||')
         fi
-      - 'echo "Resolved branch name: $BRANCH_NAME"'
+
+        export BRANCH_NAME
+        echo "Resolved branch name: $BRANCH_NAME"
 
   build:
     commands:
@@ -77,25 +80,25 @@ phases:
         fi
 
       - |
-          echo "Waiting for SonarCloud Quality Gate"
-          sleep 15
+        echo "Waiting for SonarCloud Quality Gate"
+        sleep 15
 
-          echo "Checking Quality Gate status"
-          curl -u "$LOGIN:" -s "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$Project" > result.json
+        echo "Checking Quality Gate status"
+        curl -u "$LOGIN:" -s "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$Project" > result.json
 
-          cat result.json
+        cat result.json
 
-          STATUS=$(jq -r '.projectStatus.status' result.json)
+        STATUS=$(jq -r '.projectStatus.status' result.json)
 
-          if [ "$STATUS" = "ERROR" ]; then
-            echo "Quality Gate Failed"
-            exit 1
-          elif [ "$STATUS" = "OK" ]; then
-            echo "Quality Gate Passed"
-          else
-            echo "Quality Gate status unknown: $STATUS"
-          fi
-        
+        if [ "$STATUS" = "ERROR" ]; then
+          echo "Quality Gate Failed"
+          exit 1
+        elif [ "$STATUS" = "OK" ]; then
+          echo "Quality Gate Passed"
+        else
+          echo "Quality Gate status unknown: $STATUS"
+        fi
+
 artifacts:
   files:
-    - '**/*'
+    - "**/*"
