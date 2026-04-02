@@ -34,6 +34,7 @@ phases:
       - echo "Extracting branch name"
       - 'echo "Raw source version: $CODEBUILD_SOURCE_VERSION"'
       - BRANCH_NAME=$(echo $CODEBUILD_SOURCE_VERSION | sed 's|refs/heads/||')
+      - if [ -z "$BRANCH_NAME" ] && [ -n "$CODEBUILD_WEBHOOK_HEAD_REF" ]; then BRANCH_NAME=$(echo $CODEBUILD_WEBHOOK_HEAD_REF | sed 's|refs/heads/||'); fi
       - 'echo "Branch name: $BRANCH_NAME"'
 
   build:
@@ -45,16 +46,12 @@ phases:
       - mvn checkstyle:checkstyle
 
       - echo "Running SonarCloud analysis"
-      - mvn sonar:sonar \
-        -Dsonar.login=$LOGIN \
-        -Dsonar.host.url=$HOST \
-        -Dsonar.projectKey=$Project \
-        -Dsonar.organization=$Organization \
-        -Dsonar.branch.name=$BRANCH_NAME \
-        -Dsonar.java.binaries=target/classes \
-        -Dsonar.junit.reportsPath=target/surefire-reports \
-        -Dsonar.jacoco.reportsPath=target/jacoco.exec \
-        -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml
+      - |
+        if [ -n "$BRANCH_NAME" ]; then
+          mvn sonar:sonar -Dsonar.login="$LOGIN" -Dsonar.host.url="$HOST" -Dsonar.projectKey="$Project" -Dsonar.organization="$Organization" -Dsonar.branch.name="$BRANCH_NAME" -Dsonar.java.binaries="target/classes" -Dsonar.junit.reportsPath="target/surefire-reports" -Dsonar.jacoco.reportsPath="target/jacoco.exec" -Dsonar.java.checkstyle.reportPaths="target/checkstyle-result.xml"
+        else
+          mvn sonar:sonar -Dsonar.login="$LOGIN" -Dsonar.host.url="$HOST" -Dsonar.projectKey="$Project" -Dsonar.organization="$Organization" -Dsonar.java.binaries="target/classes" -Dsonar.junit.reportsPath="target/surefire-reports" -Dsonar.jacoco.reportsPath="target/jacoco.exec" -Dsonar.java.checkstyle.reportPaths="target/checkstyle-result.xml"
+        fi
 
       - echo "Waiting for SonarCloud Quality Gate"
       - sleep 10
