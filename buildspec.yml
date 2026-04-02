@@ -1,3 +1,4 @@
+
 version: 0.2
 
 env:
@@ -30,11 +31,11 @@ phases:
     commands:
       - echo "Installing dependencies"
       - apt-get update
-      - apt-get install -y checkstyle
+      - apt-get install -y jq checkstyle curl
 
       - echo "Extracting branch name"
-      - echo "CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION"
-      - echo "CODEBUILD_WEBHOOK_HEAD_REF=$CODEBUILD_WEBHOOK_HEAD_REF"
+      - 'echo "CODEBUILD_SOURCE_VERSION=$CODEBUILD_SOURCE_VERSION"'
+      - 'echo "CODEBUILD_WEBHOOK_HEAD_REF=$CODEBUILD_WEBHOOK_HEAD_REF"'
       - export BRANCH_NAME=$(echo "$CODEBUILD_WEBHOOK_HEAD_REF" | sed 's|refs/heads/||')
       - |
         if [ -z "$BRANCH_NAME" ]; then
@@ -44,11 +45,57 @@ phases:
 
   build:
     commands:
-      - echo "Skipping tests for now"
-      - mvn clean package -DskipTests
+      - echo "Running tests"
+      - mvn clean test
 
       - echo "Running checkstyle"
       - mvn checkstyle:checkstyle
+
+      - echo "Running SonarCloud analysis"
+      - |
+        if [ -n "$BRANCH_NAME" ]; then
+          mvn sonar:sonar \
+            -Dsonar.login="$LOGIN" \
+            -Dsonar.host.url="$HOST" \
+            -Dsonar.projectKey="$Project" \
+            -Dsonar.organization="$Organization" \
+            -Dsonar.branch.name="$BRANCH_NAME" \
+            -Dsonar.java.binaries="target/classes" \
+            -Dsonar.junit.reportsPath="target/surefire-reports" \
+            -Dsonar.coverage.jacoco.xmlReportPaths="target/site/jacoco/jacoco.xml" \
+            -Dsonar.java.checkstyle.reportPaths="target/checkstyle-result.xml"
+        else
+          mvn sonar:sonar \
+            -Dsonar.login="$LOGIN" \
+            -Dsonar.host.url="$HOST" \
+            -Dsonar.projectKey="$Project" \
+            -Dsonar.organization="$Organization" \
+            -Dsonar.java.binaries="target/classes" \
+            -Dsonar.junit.reportsPath="target/surefire-reports" \
+            -Dsonar.coverage.jacoco.xmlReportPaths="target/site/jacoco/jacoco.xml" \
+            -Dsonar.java.checkstyle.reportPaths="target/checkstyle-result.xml"
+        fi
+
+      - |
+          echo "Waiting for SonarCloud Quality Gate"
+          sleep 15
+
+          echo "Checking Quality Gate status"
+          curl -u "$LOGIN:" -s "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$Project" > result.json
+
+          cat result.json
+
+          STATUS=$(jq -r '.projectStatus.status' result.json)
+
+          if [ "$STATUS" = "ERROR" ]; then
+            echo "Quality Gate Failed"
+            exit 1
+          elif [ "$STATUS" = "OK" ]; then
+            echo "Quality Gate Passed"
+          else
+            echo "Quality Gate status unknown: $STATUS"
+          fi
+        
 artifacts:
   files:
     - '**/*'
