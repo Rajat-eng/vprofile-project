@@ -40,7 +40,7 @@ phases:
         if [ -z "$BRANCH_NAME" ]; then
           BRANCH_NAME=$(echo "$CODEBUILD_SOURCE_VERSION" | sed 's|refs/heads/||')
         fi
-      - echo "Resolved branch name: $BRANCH_NAME"
+      - 'echo "Resolved branch name: $BRANCH_NAME"'
 
   build:
     commands:
