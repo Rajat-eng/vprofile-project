@@ -37,9 +37,9 @@ phases:
       - export PATH=$PATH:/opt/maven/bin
 
       - echo "Extracting branch name"
-      - echo "Raw source version: $CODEBUILD_SOURCE_VERSION"
+      - 'echo "Raw source version: $CODEBUILD_SOURCE_VERSION"'
       - BRANCH_NAME=$(echo $CODEBUILD_SOURCE_VERSION | sed 's|refs/heads/||')
-      - echo "Branch name: $BRANCH_NAME"
+      - 'echo "Branch name: $BRANCH_NAME"'
 
   build:
     commands:
