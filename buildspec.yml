@@ -17,13 +17,7 @@ phases:
       - cp ./settings.xml /root/.m2/settings.xml
 
       - echo "Getting CodeArtifact token"
-      - export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-        --domain rexy \
-        --domain-owner 326306381458 \
-        --region ap-south-1 \
-        --query authorizationToken \
-        --output text)
-
+      - export CODEARTIFACT_AUTH_TOKEN=`aws codeartifact get-authorization-token --domain rexy --domain-owner 326306381458 --region ap-south-1 --query authorizationToken --output text`
       - echo "Installing Maven"
       - wget https://repo1.maven.org/maven2/org/apache/maven/apache-maven/3.9.4/apache-maven-3.9.4-bin.tar.gz
       - tar xzvf apache-maven-3.9.4-bin.tar.gz
